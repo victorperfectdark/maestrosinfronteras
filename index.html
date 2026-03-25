@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Maestros Sin Fronteras — Buscador de PDFs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:       #0c0c10;
+    --surface:  #16161d;
+    --border:   rgba(255,255,255,0.07);
+    --border2:  rgba(255,255,255,0.13);
+    --text:     #e8e6e1;
+    --muted:    #6b6a67;
+    --muted2:   #9a9894;
+    --accent:   #7c6af7;
+    --accent2:  #9d8fff;
+    --hit-bg:   rgba(124,106,247,0.18);
+    --hit-text: #b8adff;
+    --snip-hit: rgba(250,200,80,0.18);
+    --snip-col: #c8960a;
+    --preview-bg: #1a1a22;
+    --scrollbar: rgba(255,255,255,0.1);
+    --card-hover: rgba(255,255,255,0.04);
+    --pager-hover: rgba(255,255,255,.06);
+  }
+  html.light {
+    --bg:       #f4f3ef;
+    --surface:  #ffffff;
+    --border:   rgba(0,0,0,0.08);
+    --border2:  rgba(0,0,0,0.14);
+    --text:     #1a1917;
+    --muted:    #9a9690;
+    --muted2:   #6b6860;
+    --accent:   #5b4de0;
+    --accent2:  #6c5ce7;
+    --hit-bg:   rgba(91,77,224,0.1);
+    --hit-text: #4a3bc4;
+    --snip-hit: rgba(180,130,0,0.12);
+    --snip-col: #8a6200;
+    --preview-bg: #e8e6e0;
+    --scrollbar: rgba(0,0,0,0.12);
+    --card-hover: rgba(0,0,0,0.03);
+    --pager-hover: rgba(0,0,0,.05);
+  }
+  html { font-family: 'DM Sans', sans-serif; font-size: 15px; }
+  body { background: var(--bg); color: var(--text); min-height: 100vh; transition: background .2s, color .2s; }
+
+  /* ── THEME TOGGLE ────────────────────────── */
+  .theme-btn {
+    width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--border2);
+    background: var(--surface); color: var(--muted2); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .15s, border-color .15s, color .15s;
+    flex-shrink: 0; font-size: 16px; line-height: 1;
+  }
+  .theme-btn:hover { background: var(--hit-bg); color: var(--accent); border-color: var(--accent); }
+
+  /* ── LAYOUT ─────────────────────────────── */
+  .app    { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+  .top    { padding: 20px 28px 0; border-bottom: 1px solid var(--border); }
+  .main   { display: grid; grid-template-columns: 380px 1fr; overflow: hidden; }
+  @media (max-width: 768px) {
+    .main { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+    .preview-col { height: 45vh; }
+  }
+
+  /* ── HEADER ─────────────────────────────── */
+  .header-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .logo { display: flex; align-items: center; gap: 10px; }
+  .logo-text { font-size: 17px; font-weight: 600; letter-spacing: -.3px; }
+  .logo-text span { color: var(--accent2); }
+  .badge {
+    background: rgba(124,106,247,0.15);
+    border: 1px solid rgba(124,106,247,0.3);
+    color: var(--accent2);
+    font-family: 'DM Mono', monospace;
+    font-size: 11px; font-weight: 500;
+    padding: 3px 8px; border-radius: 20px;
+  }
+  .search-wrap { position: relative; margin-bottom: 14px; }
+  .search-icon { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+  .search-icon svg { display: block; }
+  #searchInput {
+    width: 100%; padding: 11px 40px 11px 40px;
+    background: var(--surface); border: 1.5px solid var(--border2);
+    border-radius: 10px; color: var(--text); font-size: 14px; font-family: inherit;
+    transition: border-color .18s, box-shadow .18s;
+  }
+  #searchInput::placeholder { color: var(--muted); }
+  #searchInput:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(124,106,247,.15); }
+  .clear-btn {
+    position: absolute; right: 11px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    display: none; font-size: 16px; line-height: 1; padding: 2px;
+  }
+  .clear-btn:hover { color: var(--text); }
+  #searchInput:not(:placeholder-shown) ~ .clear-btn { display: block; }
+
+  /* ── SIDEBAR ────────────────────────────── */
+  .sidebar { border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+  .sidebar-head {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .sidebar-head .info { font-size: 12px; color: var(--muted); }
+  .sidebar-head .info b { color: var(--muted2); font-weight: 500; }
+  .result-list { overflow-y: auto; flex: 1; padding: 8px; }
+  .result-list::-webkit-scrollbar { width: 4px; }
+  .result-list::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 2px; }
+
+  /* ── RESULT CARD ────────────────────────── */
+  .card {
+    padding: 11px 13px; border-radius: 9px; cursor: pointer;
+    border: 1px solid transparent;
+    transition: background .15s, border-color .15s;
+    margin-bottom: 3px;
+  }
+  .card:hover { background: var(--card-hover); border-color: var(--border); }
+  .card.active { background: var(--hit-bg); border-color: rgba(124,106,247,.35); }
+  .card-title {
+    font-size: 13px; font-weight: 500; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    margin-bottom: 3px;
+  }
+  .card-meta { font-size: 11px; color: var(--muted); margin-bottom: 5px; display: flex; gap: 8px; }
+  .card-snippet {
+    font-size: 12px; color: var(--muted2); line-height: 1.55;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .tags { display: flex; gap: 4px; margin-top: 5px; flex-wrap: wrap; }
+  .tag {
+    font-family: 'DM Mono', monospace; font-size: 10px;
+    padding: 1px 6px; border-radius: 4px;
+    background: rgba(124,106,247,.12); border: 1px solid rgba(124,106,247,.25);
+    color: var(--accent2);
+  }
+  mark        { background: var(--hit-bg); color: var(--hit-text); border-radius: 2px; padding: 0 1px; font-style: normal; }
+  .snip-mark  { background: var(--snip-hit); color: var(--snip-col); border-radius: 2px; padding: 0 1px; font-style: normal; }
+
+  /* ── STATES ─────────────────────────────── */
+  .empty-state { padding: 48px 20px; text-align: center; }
+  .empty-state .icon { font-size: 36px; margin-bottom: 10px; }
+  .empty-state p   { color: var(--muted); font-size: 13px; line-height: 1.6; }
+  .empty-state b   { color: var(--muted2); }
+
+  /* ── LOADING OVERLAY ─────────────────────── */
+  #loading-overlay {
+    position: fixed; inset: 0; background: rgba(12,12,16,.92);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    z-index: 100; gap: 16px;
+  }
+  .spinner { width: 36px; height: 36px; border: 3px solid rgba(124,106,247,.2); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #loading-overlay p { color: var(--muted2); font-size: 14px; }
+  #loading-overlay b { color: var(--text); }
+  .progress-track { width: 220px; height: 3px; background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden; }
+  .progress-fill  { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 2px; transition: width .3s ease; width: 0%; }
+
+  /* ── PAGINATION ──────────────────────────── */
+  .pager { padding: 10px 8px; border-top: 1px solid var(--border); display: flex; gap: 4px; flex-wrap: wrap; flex-shrink: 0; }
+  .pager button {
+    min-width: 30px; height: 30px; border-radius: 7px; border: 1px solid var(--border);
+    background: transparent; color: var(--muted2); font-size: 12px; cursor: pointer;
+    transition: all .15s; font-family: inherit;
+  }
+  .pager button:hover  { background: var(--pager-hover); color: var(--text); }
+  .pager button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* ── PREVIEW ─────────────────────────────── */
+  .preview-col { display: flex; flex-direction: column; overflow: hidden; }
+  .preview-head {
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+  }
+  .preview-head .pdf-icon { font-size: 18px; line-height: 1; flex-shrink: 0; }
+  .preview-head .pdf-name { font-size: 13px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .preview-head .pdf-pages { font-size: 11px; color: var(--muted); flex-shrink: 0; font-family: 'DM Mono', monospace; }
+  #preview { flex: 1; border: none; background: var(--preview-bg); }
+  .preview-empty {
+    flex: 1; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 10px; color: var(--muted);
+  }
+  .preview-empty .big-icon { font-size: 48px; opacity: .3; }
+  .preview-empty p { font-size: 13px; }
+
+  /* ── ERROR BANNER ────────────────────────── */
+  #error-banner {
+    display: none; background: rgba(200,60,60,.15); border: 1px solid rgba(200,60,60,.3);
+    color: #f87171; border-radius: 8px; padding: 10px 14px;
+    font-size: 13px; margin: 10px; line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div id="loading-overlay">
+  <div class="spinner"></div>
+  <div class="progress-track"><div class="progress-fill" id="prog-fill"></div></div>
+  <p id="loading-msg">Cargando índice de PDFs…</p>
+</div>
+
+<div class="app">
+  <!-- TOP BAR -->
+  <div class="top">
+    <div class="header-row">
+      <div class="logo">
+        <img src="logo.png" alt="Maestros Sin Fronteras" style="height:38px;width:auto;object-fit:contain"/>
+        <span class="logo-text">PDF<span>Busqueda</span></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="badge" id="total-badge">cargando…</span>
+        <button class="theme-btn" id="themeBtn" title="Cambiar tema">🌙</button>
+      </div>
+    </div>
+    <div class="search-wrap">
+      <span class="search-icon">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      </span>
+      <input id="searchInput" type="text" placeholder="Buscar por numero de cedula…" autocomplete="off" spellcheck="false"/>
+      <button class="clear-btn" id="clearBtn" title="Limpiar">✕</button>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+      <div class="sidebar-head">
+        <span class="info" id="result-info">—</span>
+      </div>
+      <div id="error-banner"></div>
+      <div class="result-list" id="result-list"></div>
+      <div class="pager" id="pager"></div>
+    </div>
+
+    <!-- PREVIEW -->
+    <div class="preview-col">
+      <div class="preview-head" id="preview-head" style="display:none">
+        <span class="pdf-icon">📄</span>
+        <span class="pdf-name" id="preview-name"></span>
+        <span class="pdf-pages" id="preview-pages"></span>
+      </div>
+      <div class="preview-empty" id="preview-empty">
+        <div class="big-icon">📄</div>
+        <p>Selecciona un archivo para previsualizarlo</p>
+      </div>
+      <iframe id="preview" style="display:none" title="Vista previa PDF"></iframe>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── CONFIG ───────────────────────────────────────────────────────────────────
+const PDF_FOLDER  = 'pdfs/';        // Carpeta donde están los PDFs
+const INDEX_FILE  = 'pdfs.json';    // Archivo con la lista de PDFs
+const PER_PAGE    = 8;
+const SNIPPET_LEN = 130;
+// ─────────────────────────────────────────────────────────────────────────────
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const $ = id => document.getElementById(id);
+let pdfIndex = [], resultados = [], pagina = 1;
+
+// ── BOOT ─────────────────────────────────────────────────────────────────────
+async function init() {
+  try {
+    setLoadingMsg('Leyendo índice de archivos…');
+
+    // 1. Fetch the file list
+    const res = await fetch(INDEX_FILE);
+    if (!res.ok) throw new Error(`No se pudo leer ${INDEX_FILE} (${res.status})`);
+    const archivos = await res.json();
+    $('total-badge').textContent = `${archivos.length} PDF${archivos.length !== 1 ? 's' : ''}`;
+
+    // 2. Check localStorage cache
+    const cacheKey = 'pdfIdx_v2';
+    const cached = tryParse(localStorage.getItem(cacheKey));
+    const cachedNames = cached ? cached.map(p => p.nombre).sort().join(',') : '';
+    const currentNames = archivos.slice().sort().join(',');
+
+    if (cached && cachedNames === currentNames) {
+      pdfIndex = cached;
+      setLoadingMsg('Cargado desde caché ✓');
+    } else {
+      // 3. Index all PDFs
+      pdfIndex = [];
+      for (let i = 0; i < archivos.length; i++) {
+        const nombre = archivos[i];
+        setLoadingMsg(`Indexando ${i + 1} / ${archivos.length}…`);
+        setProgress((i + 1) / archivos.length);
+        try {
+          const { texto, paginas } = await indexPDF(PDF_FOLDER + nombre);
+          pdfIndex.push({ nombre, texto, paginas });
+        } catch(e) {
+          console.warn('Error indexando', nombre, e);
+          pdfIndex.push({ nombre, texto: '', paginas: 0 });
+        }
+      }
+      localStorage.setItem(cacheKey, JSON.stringify(pdfIndex));
+    }
+
+    hideLoading();
+    resultados = [...pdfIndex];
+    renderList();
+
+  } catch(err) {
+    hideLoading();
+    showError(`<b>Error al cargar el índice:</b> ${err.message}<br>
+      Asegúrate de que existe el archivo <code>pdfs.json</code> junto a este HTML,
+      y que el sitio está servido desde un servidor web (no abierto como archivo local).`);
+  }
+}
+
+async function indexPDF(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const buffer = await res.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  let texto = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    texto += content.items.map(it => it.str).join(' ') + ' ';
+  }
+  return { texto: texto.toLowerCase(), paginas: pdf.numPages };
+}
+
+// ── SEARCH ───────────────────────────────────────────────────────────────────
+let debTimer;
+$('searchInput').addEventListener('input', () => {
+  clearTimeout(debTimer);
+  debTimer = setTimeout(doSearch, 180);
+});
+$('clearBtn').addEventListener('click', () => {
+  $('searchInput').value = '';
+  doSearch();
+  $('searchInput').focus();
+});
+
+function doSearch() {
+  const q = $('searchInput').value.trim().toLowerCase();
+  resultados = q
+    ? pdfIndex.filter(p => p.nombre.toLowerCase().includes(q) || p.texto.includes(q))
+    : [...pdfIndex];
+  pagina = 1;
+  renderList();
+}
+
+// ── RENDER ───────────────────────────────────────────────────────────────────
+function renderList() {
+  const q = $('searchInput').value.trim();
+  const list = $('result-list');
+  const pager = $('pager');
+  list.innerHTML = '';
+  pager.innerHTML = '';
+
+  // Info line
+  $('result-info').innerHTML = q
+    ? `<b>${resultados.length}</b> resultado${resultados.length !== 1 ? 's' : ''} para "<b>${esc(q)}</b>"`
+    : `<b>${pdfIndex.length}</b> documentos`;
+
+  if (!resultados.length) {
+    list.innerHTML = `
+      <div class="empty-state">
+        <div class="icon">🔍</div>
+        <p>Sin resultados para "<b>${esc(q)}</b>"<br>Prueba con otras palabras clave.</p>
+      </div>`;
+    return;
+  }
+
+  const start = (pagina - 1) * PER_PAGE;
+  const slice = resultados.slice(start, start + PER_PAGE);
+
+  slice.forEach((p, i) => {
+    const inName    = q && p.nombre.toLowerCase().includes(q.toLowerCase());
+    const inContent = q && p.texto.includes(q.toLowerCase());
+    const snippet   = q ? getSnippet(p.texto, q.toLowerCase()) : '';
+
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.dataset.nombre = p.nombre;
+    card.innerHTML = `
+      <div class="card-title">${q ? hlName(p.nombre, q) : esc(p.nombre)}</div>
+      <div class="card-meta">
+        ${p.paginas ? `<span>${p.paginas} pág.</span>` : ''}
+      </div>
+      ${snippet ? `<div class="card-snippet">${hlSnip(snippet, q)}</div>` : ''}
+      <div class="tags">
+        ${inName    ? '<span class="tag">nombre</span>' : ''}
+        ${inContent ? '<span class="tag">contenido</span>' : ''}
+      </div>`;
+    card.addEventListener('click', () => openPDF(p, card));
+    list.appendChild(card);
+  });
+
+  // Auto-open first
+  const first = list.querySelector('.card');
+  if (first) openPDF(resultados[start], first);
+
+  // Pagination
+  const total = Math.ceil(resultados.length / PER_PAGE);
+  if (total > 1) {
+    for (let i = 1; i <= total; i++) {
+      const btn = document.createElement('button');
+      btn.textContent = i;
+      if (i === pagina) btn.classList.add('active');
+      btn.addEventListener('click', () => { pagina = i; renderList(); });
+      pager.appendChild(btn);
+    }
+  }
+}
+
+// ── PREVIEW ──────────────────────────────────────────────────────────────────
+function openPDF(p, card) {
+  // Highlight active card
+  document.querySelectorAll('.card').forEach(c => c.classList.remove('active'));
+  card.classList.add('active');
+
+  const q = $('searchInput').value.trim();
+  const url = PDF_FOLDER + p.nombre;
+  $('preview').src = q ? `${url}#search=${encodeURIComponent(q)}` : url;
+  $('preview').style.display = 'block';
+  $('preview-empty').style.display = 'none';
+  $('preview-head').style.display = 'flex';
+  $('preview-name').textContent = p.nombre;
+  $('preview-pages').textContent = p.paginas ? `${p.paginas} páginas` : '';
+}
+
+// ── HELPERS ──────────────────────────────────────────────────────────────────
+function getSnippet(text, q) {
+  const idx = text.indexOf(q);
+  if (idx === -1) return '';
+  const start = Math.max(0, idx - 45);
+  const end   = Math.min(text.length, idx + q.length + 85);
+  let s = text.slice(start, end).replace(/\s+/g, ' ');
+  if (start > 0) s = '…' + s;
+  if (end < text.length) s += '…';
+  return s;
+}
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function hlName(name, q) {
+  const re = new RegExp(`(${reEsc(q)})`, 'gi');
+  return esc(name).replace(re, '<mark>$1</mark>');
+}
+function hlSnip(snip, q) {
+  const re = new RegExp(`(${reEsc(q)})`, 'gi');
+  return esc(snip).replace(re, '<mark class="snip-mark">$1</mark>');
+}
+function reEsc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
+function tryParse(s) { try { return s ? JSON.parse(s) : null; } catch { return null; } }
+
+// ── LOADING UI ───────────────────────────────────────────────────────────────
+function setLoadingMsg(msg) { $('loading-msg').innerHTML = msg; }
+function setProgress(v)     { $('prog-fill').style.width = (v * 100) + '%'; }
+function hideLoading()      { $('loading-overlay').style.display = 'none'; }
+function showError(html) {
+  const b = $('error-banner');
+  b.style.display = 'block';
+  b.innerHTML = html;
+}
+
+// ── THEME ─────────────────────────────────────────────────────────────────────
+const themeBtn = $('themeBtn');
+const savedTheme = localStorage.getItem('theme') || 'dark';
+applyTheme(savedTheme);
+
+themeBtn.addEventListener('click', () => {
+  const next = document.documentElement.classList.contains('light') ? 'dark' : 'light';
+  applyTheme(next);
+  localStorage.setItem('theme', next);
+});
+
+function applyTheme(theme) {
+  document.documentElement.classList.toggle('light', theme === 'light');
+  themeBtn.textContent = theme === 'light' ? '🌙' : '☀️';
+  themeBtn.title = theme === 'light' ? 'Cambiar a modo oscuro' : 'Cambiar a modo claro';
+}
+
+init();
+</script>
+</body>
+</html>
